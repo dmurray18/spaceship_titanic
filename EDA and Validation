@@ -1,10 +1,3 @@
-"""
-Generates final EDA charts and validation metrics from the REAL train.csv
-for the project writeup. Uses an internal held-out split since Kaggle's
-official test.csv (unlabeled) isn't available in this environment --
-the main spaceship_titanic.py script handles the real test.csv + submission
-generation once that file is downloaded from Kaggle.
-"""
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
