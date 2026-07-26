@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Environment
+.env
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# LaTeX build artifacts (writeup.pdf is committed; these intermediates are not)
+*.aux
+*.log
+*.out
+*.toc
+
+# Kaggle's real test.csv and any generated submission -- see README note on this
+test.csv
+submission.csv
