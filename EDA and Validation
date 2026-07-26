@@ -1,0 +1,116 @@
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, StandardScaler
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, confusion_matrix, ConfusionMatrixDisplay
+import xgboost as xgb
+ 
+RANDOM_STATE = 18
+df = pd.read_csv("train.csv")
+print("Real dataset shape:", df.shape)
+ 
+
+df["TotalSpend"] = df[spend_cols].sum(axis=1)
+
+for c in ["VIP","CryoSleep","HomePlanet","Destination"]:
+    df[c] = df[c].fillna(df[c].mode()[0])
+for c in ["Age","RoomService","FoodCourt","ShoppingMall","Spa","VRDeck"]:
+    df[c] = df[c].fillna(df[c].median())
+df["Cabin"] = df["Cabin"].fillna("Unknown/0/Unknown")
+ 
+
+df[["Group","People"]] = df["PassengerId"].str.split("_", expand=True)
+df["Group"] = pd.to_numeric(df["Group"])
+df["GroupSize"] = df.groupby("Group")["Group"].transform("count")
+df[["Deck","CabinNum","Side"]] = df["Cabin"].str.split("/", expand=True)
+df["CabinNum"] = pd.to_numeric(df["CabinNum"], errors="coerce")
+df["CabinNum"] = df["CabinNum"].fillna(df["CabinNum"].median())
+df["NoSpend"] = (df["TotalSpend"] == 0).astype(int)
+
+fig, axes = plt.subplots(2, 3, figsize=(16, 9))
+sns.histplot(data=df[df['CryoSleep'] == 1], ax=axes[0,0], x="Deck", hue="Transported", multiple="stack")
+axes[0,0].set_title("Transported by Deck in CryoSleep")
+sns.histplot(data=df, x="Age", hue="Transported", bins=30, ax=axes[0,1], element="step")
+axes[0,1].set_title("Age distribution by Transported")
+sns.countplot(data=df, x="HomePlanet", hue="Transported", ax=axes[0,2])
+axes[0,2].set_title("HomePlanet vs Transported")
+sns.countplot(data=df, x="CryoSleep", hue="Transported", ax=axes[1,0])
+axes[1,0].set_title("CryoSleep vs Transported")
+sns.heatmap(df.isnull(), cbar=False, yticklabels=False, ax=axes[1,1], cmap="Reds")
+axes[1,1].set_title("Missing data pattern")
+spend_cols = ["RoomService","FoodCourt","ShoppingMall","Spa","VRDeck"]
+sns.histplot(data=df, x="TotalSpend", hue="Transported", bins=50, ax=axes[1,2], log_scale=(False,True))
+axes[1,2].set_title("Total spend by Transported")
+plt.tight_layout()
+plt.savefig("eda_overview.png", dpi=150)
+plt.close()
+
+
+
+binenc = OrdinalEncoder()
+df[["VIP","CryoSleep"]] = binenc.fit_transform(df[["VIP","CryoSleep"]])
+y = df["Transported"].astype(int)
+ 
+for col in ["HomePlanet","Destination","Deck","Side"]:
+    enc = OneHotEncoder(sparse_output=False, handle_unknown="ignore").set_output(transform="pandas")
+    dummies = enc.fit_transform(df[[col]])
+    df = pd.concat([df.drop(columns=[col]), dummies], axis=1)
+ 
+X = df.drop(columns=["Name","Cabin","PassengerId","People","Transported"])
+print("Final feature matrix:", X.shape, "| NaNs:", X.isnull().sum().sum())
+
+
+
+
+
+X_tr, X_val, y_tr, y_val = train_test_split(X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y)
+scaler = StandardScaler()
+X_tr_scaled = scaler.fit_transform(X_tr)
+X_val_scaled = scaler.transform(X_val)
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
+ 
+models = {
+    "Logistic Regression": LogisticRegression(max_iter=1000, random_state=RANDOM_STATE),
+    "Random Forest": RandomForestClassifier(n_estimators=300, random_state=RANDOM_STATE),
+    "XGBoost": xgb.XGBClassifier(n_estimators=300, eval_metric="logloss", random_state=RANDOM_STATE),
+}
+results = {}
+for name, model in models.items():
+    X_fit = X_tr_scaled if name == "Logistic Regression" else X_tr
+    X_eval = X_val_scaled if name == "Logistic Regression" else X_val
+    cvs = cross_val_score(model, X_fit, y_tr, cv=cv, scoring="accuracy")
+    model.fit(X_fit, y_tr)
+    preds = model.predict(X_eval)
+    probs = model.predict_proba(X_eval)[:,1]
+    results[name] = {
+        "cv_mean": cvs.mean(), "cv_std": cvs.std(),
+        "val_acc": accuracy_score(y_val, preds),
+        "f1": f1_score(y_val, preds),
+        "auc": roc_auc_score(y_val, probs),
+    }
+    print(f"{name}: CV {cvs.mean():.4f} | Val Acc {results[name]['val_acc']:.4f} | F1 {results[name]['f1']:.4f} | AUC {results[name]['auc']:.4f}")
+ 
+pd.DataFrame(results).T.to_csv("model_comparison_final.csv")
+ 
+best_name = max(results, key=lambda k: results[k]["f1"])
+best_model = models[best_name]
+preds = best_model.predict(X_val)
+ 
+fig, ax = plt.subplots(1, 2, figsize=(12,5))
+cm = confusion_matrix(y_val, preds)
+ConfusionMatrixDisplay(cm, display_labels=["Not Transported","Transported"]).plot(ax=ax[0], cmap="Blues")
+ax[0].set_title(f"Confusion Matrix — {best_name}")
+importances = pd.Series(best_model.feature_importances_, index=X.columns).sort_values().tail(12)
+importances.plot(kind="barh", ax=ax[1], color="#534AB7")
+ax[1].set_title("Top 12 Feature Importances")
+plt.tight_layout()
+plt.savefig("best_model_diagnostics.png", dpi=150)
+plt.close()
+ 
+print("\nBest model:", best_name)
+print("Saved: eda_overview.png, best_model_diagnostics.png, model_comparison_final.csv")
