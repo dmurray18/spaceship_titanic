@@ -34,12 +34,9 @@ Full technical writeup, including the fix for each: [`writeup.pdf`](./writeup.pd
 ```
 spaceship_titanic.py         # full pipeline: train + test -> submission.csv (needs Kaggle's real test.csv)
 generate_report_assets.py    # regenerates the charts and metrics below from train.csv alone
-writeup.tex / writeup.pdf    # full technical report
 eda_overview.png             # 6-panel exploratory data analysis
 best_model_diagnostics.png   # confusion matrix + feature importance for XGBoost
-model_comparison_final.csv   # raw metrics table
 train.csv                    # Kaggle training data (8,693 labeled passengers)
-requirements.txt
 ```
  
 ## How to run
