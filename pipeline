@@ -1,0 +1,124 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, confusion_matrix, ConfusionMatrixDisplay
+import xgboost as xgb
+ 
+RANDOM_STATE = 18
+ 
+space_train = pd.read_csv("train.csv")
+space_test = pd.read_csv("test.csv")
+test_passenger_ids = space_test["PassengerId"].copy()   
+
+def impute(df, reference=None):
+    ref = reference if reference is not None else df
+    df = df.copy()
+ 
+    cat_fill_cols = ["VIP", "CryoSleep", "HomePlanet", "Destination"]
+    for c in cat_fill_cols:
+        df[c] = df[c].fillna(ref[c].mode()[0])
+ 
+    num_fill_cols = ["Age", "RoomService", "FoodCourt", "ShoppingMall", "Spa", "VRDeck"]
+    for c in num_fill_cols:
+        df[c] = df[c].fillna(ref[c].median())
+ 
+    df["Cabin"] = df["Cabin"].fillna("Unknown/0/Unknown")
+    return df
+ 
+space_train = impute(space_train)
+space_test = impute(space_test, reference=space_train)   
+ 
+
+def engineer(df):
+    df = df.copy()
+    df[["Group", "People"]] = df["PassengerId"].str.split("_", expand=True)
+    df["Group"] = pd.to_numeric(df["Group"])                   
+    df["GroupSize"] = df.groupby("Group")["Group"].transform("count")
+ 
+    df[["Deck", "CabinNum", "Side"]] = df["Cabin"].str.split("/", expand=True)
+    df["CabinNum"] = pd.to_numeric(df["CabinNum"], errors="coerce")
+    df["CabinNum"] = df["CabinNum"].fillna(df["CabinNum"].median())
+ 
+    spend_cols = ["RoomService", "FoodCourt", "ShoppingMall", "Spa", "VRDeck"]
+    df["TotalSpend"] = df[spend_cols].sum(axis=1)
+    df["NoSpend"] = (df["TotalSpend"] == 0).astype(int)
+ 
+    return df
+ 
+space_train = engineer(space_train)
+space_test = engineer(space_test)
+
+binary_encoder = OrdinalEncoder()
+space_train[["VIP", "CryoSleep"]] = binary_encoder.fit_transform(space_train[["VIP", "CryoSleep"]])
+space_test[["VIP", "CryoSleep"]] = binary_encoder.transform(space_test[["VIP", "CryoSleep"]])
+ 
+
+y_train = space_train["Transported"].astype(int)
+
+onehot_cols = ["HomePlanet", "Destination", "Deck", "Side"]
+planet_encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore").set_output(transform="pandas")
+dest_encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore").set_output(transform="pandas")
+deck_encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore").set_output(transform="pandas")
+side_encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore").set_output(transform="pandas")
+ 
+def onehot_apply(df, col, encoder, fit=True):
+    enc = encoder.fit_transform(df[[col]]) if fit else encoder.transform(df[[col]])
+    return pd.concat([df.drop(columns=[col]), enc], axis=1)
+ 
+space_train = onehot_apply(space_train, "HomePlanet", planet_encoder, fit=True)
+space_test  = onehot_apply(space_test,  "HomePlanet", planet_encoder, fit=False)
+ 
+space_train = onehot_apply(space_train, "Destination", dest_encoder, fit=True)
+space_test  = onehot_apply(space_test,  "Destination", dest_encoder, fit=False)
+ 
+space_train = onehot_apply(space_train, "Deck", deck_encoder, fit=True)
+space_test  = onehot_apply(space_test,  "Deck", deck_encoder, fit=False)
+ 
+space_train = onehot_apply(space_train, "Side", side_encoder, fit=True)
+space_test  = onehot_apply(space_test,  "Side", side_encoder, fit=False)
+ 
+drop_cols = ["Name", "Cabin", "PassengerId", "People"]
+space_train = space_train.drop(columns=drop_cols + ["Transported"])
+space_test = space_test.drop(columns=drop_cols)
+ 
+
+space_train, space_test = space_train.align(space_test, join="left", axis=1, fill_value=0)
+ 
+print("Final train feature shape:", space_train.shape)
+print("Final test feature shape:", space_test.shape)
+
+ 
+
+X_tr, X_val, y_tr, y_val = train_test_split(
+    space_train, y_train, test_size=0.2, random_state=RANDOM_STATE, stratify=y_train
+)
+ 
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
+model = xgb.XGBClassifier(n_estimators=300, eval_metric="logloss", random_state=RANDOM_STATE)
+ 
+cv_scores = cross_val_score(model, X_tr, y_tr, cv=cv, scoring="accuracy")
+print(f"\n5-fold CV accuracy: {cv_scores.mean():.4f} (+/- {cv_scores.std():.4f})")
+ 
+model.fit(X_tr, y_tr)
+val_preds = model.predict(X_val)
+print(f"Validation accuracy: {accuracy_score(y_val, val_preds):.4f}")
+print(f"Validation F1: {f1_score(y_val, val_preds):.4f}")
+print(f"Validation AUC: {roc_auc_score(y_val, model.predict_proba(X_val)[:,1]):.4f}")
+ 
+
+model.fit(space_train, y_train)
+test_preds = model.predict(space_test).astype(bool)
+ 
+submission = pd.DataFrame({
+    "PassengerId": test_passenger_ids,
+    "Transported": test_preds
+})
+submission.to_csv("submission.csv", index=False)
+print("\nSaved submission.csv -- ready to upload to Kaggle")
+print(submission.head())
+ 
