@@ -1,4 +1,10 @@
-
+"""
+Generates final EDA charts and validation metrics from the REAL train.csv
+for the project writeup. Uses an internal held-out split since Kaggle's
+official test.csv (unlabeled) isn't available in this environment --
+the main spaceship_titanic.py script handles the real test.csv + submission
+generation once that file is downloaded from Kaggle.
+"""
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,20 +16,12 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, confusion_matrix, ConfusionMatrixDisplay
 import xgboost as xgb
  
-RANDOM_STATE = 18
+RANDOM_STATE = 42
 df = pd.read_csv("train.csv")
 print("Real dataset shape:", df.shape)
  
 
 df["TotalSpend"] = df[spend_cols].sum(axis=1)
-
-for c in ["VIP","CryoSleep","HomePlanet","Destination"]:
-    df[c] = df[c].fillna(df[c].mode()[0])
-for c in ["Age","RoomService","FoodCourt","ShoppingMall","Spa","VRDeck"]:
-    df[c] = df[c].fillna(df[c].median())
-df["Cabin"] = df["Cabin"].fillna("Unknown/0/Unknown")
- 
-
 df[["Group","People"]] = df["PassengerId"].str.split("_", expand=True)
 df["Group"] = pd.to_numeric(df["Group"])
 df["GroupSize"] = df.groupby("Group")["Group"].transform("count")
@@ -49,6 +47,18 @@ axes[1,2].set_title("Total spend by Transported")
 plt.tight_layout()
 plt.savefig("eda_overview.png", dpi=150)
 plt.close()
+
+
+for c in ["VIP","CryoSleep","HomePlanet","Destination"]:
+    df[c] = df[c].fillna(df[c].mode()[0])
+for c in ["Age","RoomService","FoodCourt","ShoppingMall","Spa","VRDeck"]:
+    df[c] = df[c].fillna(df[c].median())
+df["Cabin"] = df["Cabin"].fillna("Unknown/0/Unknown")
+ 
+
+
+
+
 
 
 
